@@ -1,0 +1,6 @@
+{
+  "appId": "com.elmejordt.playoffs",
+  "appName": "El Mejor DT",
+  "webDir": "www",
+  "android": { "backgroundColor": "#0b1f17" }
+}
