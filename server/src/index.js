@@ -5,13 +5,19 @@ import { randomBytes } from 'node:crypto';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createGame, GameError } from './game.js';
+import { createPayments } from './payments.js';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const WWW = join(ROOT, 'www');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon' };
 
-export function createApp(dbPath) {
+export function createApp(dbPath, opts = {}) {
   const game = createGame(dbPath);
+  const payments = createPayments(game, {
+    accessToken: opts.mpAccessToken ?? process.env.MP_ACCESS_TOKEN,
+    publicUrl: opts.publicUrl ?? process.env.PUBLIC_URL,
+    fetchImpl: opts.fetchImpl,
+  });
   const routes = [];
   const route = (method, path, handler, opts = {}) => {
     const keys = [];
@@ -31,7 +37,8 @@ export function createApp(dbPath) {
   // --- Público ---
   route('POST', '/api/register', ({ body, ip }) => { limit('reg:' + ip, 20, 3600e3); return game.register(body); });
   route('POST', '/api/login', ({ body, ip }) => { limit('login:' + ip + ':' + String(body.username).toLowerCase(), 10, 600e3); return game.login(body); });
-  route('GET', '/api/bootstrap', ({ user }) => game.bootstrap(user));
+  route('GET', '/api/bootstrap', ({ user }) => ({ ...game.bootstrap(user), payments_enabled: payments.enabled }));
+  route('POST', '/api/payments/webhook', ({ query, body, ip }) => { limit('mp:' + ip, 300, 600e3); return payments.webhook(query, body); });
   route('GET', '/api/ranking', ({ query, user }) => game.ranking(Number(query.get('round')) || 0, user));
   route('GET', '/api/lineup/:user/:round', ({ params, user }) => game.lineup(Number(params.user), Number(params.round), user));
   route('GET', '/api/prizes', () => game.prizes());
@@ -39,6 +46,8 @@ export function createApp(dbPath) {
   const auth = { auth: true };
   route('POST', '/api/logout', ({ token }) => { game.logout(token); return {}; }, auth);
   route('PUT', '/api/squad', ({ user, body }) => game.saveSquad(user, body), auth);
+  route('POST', '/api/payments/checkout', ({ user, body }) => { limit('buy:' + user.id, 20, 3600e3); return payments.checkout(user, body.quantity); }, auth);
+  route('POST', '/api/payments/confirm', ({ user, body }) => { limit('conf:' + user.id, 30, 600e3); return payments.confirm(user, body.payment_id); }, auth);
   route('POST', '/api/pins/redeem', ({ user, body }) => { limit('pin:' + user.id, 8, 3600e3); return game.redeemPin(user, body.code); }, auth);
   // --- Administración ---
   const adm = { auth: true, admin: true };
@@ -119,7 +128,7 @@ export function createApp(dbPath) {
   const timer = setInterval(() => { try { game.lockDueRounds(); } catch (e) { console.error(e); } }, 30_000);
   timer.unref();
   server.on('close', () => clearInterval(timer));
-  return { server, game };
+  return { server, game, payments };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -132,5 +141,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.log(`\n>>> Usuario administrador creado: admin / ${pw}\n>>> Guardá esta contraseña (o definí ADMIN_USER y ADMIN_PASSWORD).\n`);
   }
   const port = Number(process.env.PORT) || 3000;
-  server.listen(port, () => console.log(`El Mejor DT escuchando en http://localhost:${port}`));
+  server.listen(port, () => console.log(`El Mejor DT escuchando en http://localhost:${port}` + (process.env.MP_ACCESS_TOKEN && !process.env.PUBLIC_URL ? '\n>>> Falta PUBLIC_URL: Mercado Pago queda deshabilitado.' : '')));
 }

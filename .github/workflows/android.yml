@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       api_base:
-        description: URL pública del servidor (https://...)
+        description: URL pública del servidor (por defecto la de www/config.js)
         required: false
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
           API_BASE: ${{ inputs.api_base || vars.API_BASE }}
         run: |
           if [ -n "$API_BASE" ]; then
-            printf "window.APP_CONFIG = { API_BASE: %s };\n" "$(node -p 'JSON.stringify(process.env.API_BASE)')" > www/config.js
+            sed -i "s#var SERVER = '[^']*'#var SERVER = '${API_BASE%/}'#" www/config.js
           fi
       - run: npx cap sync android
       - name: APK de prueba

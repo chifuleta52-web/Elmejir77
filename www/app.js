@@ -12,6 +12,7 @@
     '4-5-1': { ARQ: 1, DEF: 4, VOL: 5, DEL: 1 }, '5-3-2': { ARQ: 1, DEF: 5, VOL: 3, DEL: 2 },
     '5-4-1': { ARQ: 1, DEF: 5, VOL: 4, DEL: 1 },
   };
+  const NATIVE = !!(window.APP_CONFIG && window.APP_CONFIG.NATIVE);
   const $app = document.getElementById('app');
   const $sheet = document.getElementById('sheet');
   const $toast = document.getElementById('toast');
@@ -235,6 +236,7 @@
 
   function viewPins() {
     const { me, settings: s } = S.boot;
+    const canBuy = S.boot.payments_enabled && (!NATIVE || s.mp_in_app);
     return `
       <div class="card hero center"><div class="small">Cambios disponibles</div><div class="big num">${me.changes_balance + me.free_left}</div>
         <div class="small">${me.changes_balance} por PIN${s.free_changes_per_round ? ` · ${me.free_left} gratis de esta fecha` : ''}</div></div>
@@ -242,9 +244,13 @@
         <form data-form="redeem"><input name="code" placeholder="XXXX-XXXX-XXXX" maxlength="14" autocomplete="off" autocapitalize="characters" aria-label="Código PIN" required>
           <button class="btn primary">Activar PIN</button></form>
         <p class="small muted">Cada PIN habilita ${s.pin_changes} cambios de jugadores. Los cambios no vencen durante el torneo.</p></div>
-      <div class="card"><h2>¿Cómo consigo un PIN?</h2>
+      ${canBuy ? `<form data-form="buy" class="card"><h2>Comprar PINs</h2>
+        <div class="row"><label class="grow">Cantidad<select name="quantity">${[1, 2, 3, 5, 10].map((n) => `<option value="${n}">${n} PIN${n > 1 ? 's' : ''} · ${n * s.pin_changes} cambios · ${money(n * s.pin_price)}</option>`).join('')}</select></label></div>
+        <button class="btn primary">Pagar con Mercado Pago</button>
+        <p class="small muted">Al aprobarse el pago, los cambios se suman solos a tu cuenta.</p></form>` : ''}
+      ${canBuy && !s.pin_buy_info ? '' : `<div class="card"><h2>¿Cómo consigo un PIN?</h2>
         <p>Precio del PIN: <b>${money(s.pin_price)}</b></p>
-        <p style="white-space:pre-wrap">${s.pin_buy_info ? esc(s.pin_buy_info) : '<span class="muted">Consultá con el organizador del torneo para comprar tu PIN.</span>'}</p></div>`;
+        <p style="white-space:pre-wrap">${s.pin_buy_info ? esc(s.pin_buy_info) : '<span class="muted">Consultá con el organizador del torneo para comprar tu PIN.</span>'}</p></div>`}`;
   }
 
   const RULES = [
@@ -295,6 +301,8 @@
       const o = a.overview;
       body = !o ? '<p class="muted">Cargando…</p>' : `
         <div class="kpis"><div><span class="small muted">Usuarios</span><b class="num">${o.users}</b></div><div><span class="small muted">Equipos</span><b class="num">${o.squads}</b></div><div><span class="small muted">PINs usados</span><b class="num">${o.pins_used}/${o.pins_total}</b></div></div>
+        <div class="card"><h2>Ventas por Mercado Pago</h2><p><b class="num">${money(o.sales.total)}</b> <span class="muted">· ${o.sales.n} pago${o.sales.n === 1 ? '' : 's'} · ${o.sales.pins} PIN${o.sales.pins === 1 ? '' : 's'}</span></p>
+          ${o.orders.length ? `<div class="tscroll"><table><tr><th>Usuario</th><th>PINs</th><th>Monto</th><th>Pago MP</th><th>Fecha</th></tr>${o.orders.map((x) => `<tr><td>${esc(x.username)}</td><td class="num">${x.quantity}</td><td class="num">${money(x.amount)}</td><td class="num">${esc(x.mp_payment)}</td><td>${esc(fmtDate(x.paid_at))}</td></tr>`).join('')}</table></div>` : ''}</div>
         <div class="card"><h2>Premios a pagar</h2>${o.prizes.length ? `<div class="list">${o.prizes.map((p) => `<div><div class="grow"><b>${esc(p.team_name)}</b> <span class="muted">(${esc(p.username)})</span><div class="small muted">${esc(p.email)} · ${p.kind === 'torneo' ? 'Torneo' : esc(round(p.round_id).name)} · ${money(p.amount)}</div></div>
           <button class="btn sm ${p.paid ? '' : 'primary'}" data-a="prizepaid" data-id="${p.id}" data-paid="${p.paid ? 0 : 1}">${p.paid ? 'Pagado ✓' : 'Marcar pagado'}</button></div>`).join('')}</div>` : '<p class="muted">Sin premios todavía.</p>'}</div>
         <div class="card"><h2>Usuarios</h2>${a.users ? `<div class="tscroll"><table><tr><th>Equipo</th><th>Usuario</th><th>Email</th><th>Pts</th><th>Cambios</th></tr>${a.users.map((u) => `<tr><td>${esc(u.team_name)}</td><td>${esc(u.username)}</td><td>${esc(u.email)}</td><td class="num">${u.points}</td><td class="num">${u.changes_balance}</td></tr>`).join('')}</table></div>` : ''}</div>`;
@@ -353,6 +361,7 @@
       body = `<form data-form="settings" class="card"><h2>Ajustes del juego</h2>
         ${f('prize_round', 'Premio por fecha ($)')}${f('prize_tournament', 'Premio del torneo ($)')}${f('pin_price', 'Precio del PIN ($)')}${f('pin_changes', 'Cambios por PIN (para PINs nuevos)')}
         ${f('free_changes_per_round', 'Cambios gratis por fecha')}${f('budget', 'Presupuesto (millones)')}${f('max_per_club', 'Máximo de jugadores por club')}
+        <label>Botón de Mercado Pago dentro de la app Android<select name="mp_in_app"><option value="0" ${s.mp_in_app ? '' : 'selected'}>No mostrar (recomendado para Play Store)</option><option value="1" ${s.mp_in_app ? 'selected' : ''}>Mostrar</option></select></label>
         <label>Cómo comprar un PIN (se muestra a los usuarios)<textarea name="pin_buy_info" rows="4" maxlength="1000" placeholder="Ej.: transferí al alias MI.ALIAS y mandá el comprobante por WhatsApp al 11-xxxx-xxxx">${esc(s.pin_buy_info)}</textarea></label>
         <button class="btn primary">Guardar ajustes</button></form>`;
     }
@@ -496,6 +505,10 @@
       const out = await api('POST', S.authMode === 'register' ? '/api/register' : '/api/login', v);
       S.token = out.token; store.set('token', out.token); S.draft = null; S.tab = 'home'; await refresh();
     },
+    buy: async (v) => {
+      const out = await api('POST', '/api/payments/checkout', { quantity: Number(v.quantity) });
+      window.location.href = out.init_point;
+    },
     redeem: async (v) => { const out = await api('POST', '/api/pins/redeem', v); await refresh(); toast(`¡PIN activado! Sumaste ${out.added} cambios.`); },
     roundlock: async (v, f) => { await api('PUT', '/api/admin/rounds/' + f.dataset.id, { lock_at: fromLocalInput(v.lock_at) }); await refresh(); toast('Horario guardado.'); },
     match: async (v) => { await api('POST', '/api/admin/matches', { ...v, kickoff: fromLocalInput(v.kickoff) }); await refresh(); toast('Partido guardado.'); },
@@ -545,7 +558,22 @@
   });
   document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !$sheet.hidden) closeSheet(); });
 
-  load().then(render).catch((e) => {
+  // Vuelta desde Mercado Pago: confirmamos el pago sin esperar al aviso del servidor.
+  async function handlePaymentReturn() {
+    const qs = new URLSearchParams(location.search);
+    if (!qs.has('pago')) return;
+    history.replaceState(null, '', location.pathname);
+    const paymentId = qs.get('payment_id') || qs.get('collection_id');
+    if (qs.get('pago') === 'error') return toast('El pago no se completó.', true);
+    if (!S.token || !paymentId || paymentId === 'null') return toast('Tu pago está en proceso. Los cambios se acreditan apenas se apruebe.');
+    try {
+      const r = await api('POST', '/api/payments/confirm', { payment_id: paymentId });
+      if (r.status === 'approved') { S.tab = 'pin'; await refresh(); toast(r.credited ? `¡Pago aprobado! Sumaste ${r.credited} cambios.` : '¡Pago aprobado! Tus cambios ya están acreditados.'); }
+      else toast('Tu pago está pendiente. Los cambios se acreditan apenas se apruebe.');
+    } catch (e) { toast(e.message, true); }
+  }
+
+  load().then(render).then(handlePaymentReturn).catch((e) => {
     $app.innerHTML = `<div class="splash"><p>${esc(e.message)}</p><button class="btn" onclick="location.reload()">Reintentar</button></div>`;
   });
 })();

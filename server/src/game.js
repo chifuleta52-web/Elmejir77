@@ -54,6 +54,10 @@ export function createGame(dbPath) {
       id INTEGER PRIMARY KEY, kind TEXT NOT NULL, round_id INTEGER, user_id INTEGER NOT NULL,
       amount INTEGER NOT NULL, points INTEGER NOT NULL, paid INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS orders (
+      id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, quantity INTEGER NOT NULL, changes INTEGER NOT NULL,
+      amount INTEGER NOT NULL, status TEXT NOT NULL, mp_preference TEXT, mp_payment TEXT UNIQUE,
+      created_at TEXT NOT NULL, paid_at TEXT);
   `);
 
   const q = (sql) => db.prepare(sql);
@@ -300,6 +304,33 @@ export function createGame(dbPath) {
     const sc = q('SELECT * FROM scores WHERE user_id=? AND round_id=?').get(userId, roundId);
     return { ...u, round_id: roundId, ...snap, points: sc?.points || 0, detail: sc ? JSON.parse(sc.detail) : [] };
   }
+  // ---------- Compras de PINs (Mercado Pago) ----------
+  function createOrder(user, quantity) {
+    quantity = Math.trunc(Number(quantity));
+    if (!(quantity >= 1 && quantity <= 10)) throw new GameError('Elegí entre 1 y 10 PINs.');
+    const s = getSettings();
+    if (!(s.pin_price > 0)) throw new GameError('La venta de PINs no está habilitada.');
+    const order = { id: randomBytes(12).toString('hex'), user_id: user.id, quantity, changes: quantity * s.pin_changes, amount: quantity * s.pin_price };
+    q("INSERT INTO orders (id,user_id,quantity,changes,amount,status,created_at) VALUES (?,?,?,?,?,'pending',?)")
+      .run(order.id, order.user_id, order.quantity, order.changes, order.amount, now());
+    return order;
+  }
+  const setOrderPreference = (id, pref) => { q('UPDATE orders SET mp_preference=? WHERE id=?').run(pref, id); };
+  /** Acredita una orden con un pago aprobado ya verificado contra Mercado Pago. Idempotente. */
+  function markOrderPaid(orderId, paymentId, paidAmount) {
+    return tx(() => {
+      const o = q('SELECT * FROM orders WHERE id=?').get(orderId);
+      if (!o) throw new GameError('Orden inexistente.', 404);
+      if (o.status === 'paid') return { credited: 0, order: o };
+      if (paidAmount + 0.001 < o.amount) throw new GameError('El monto pagado no coincide con la orden.');
+      if (q('SELECT 1 FROM orders WHERE mp_payment=? AND id<>?').get(String(paymentId), orderId)) throw new GameError('Ese pago ya fue usado.');
+      q("UPDATE orders SET status='paid', mp_payment=?, paid_at=? WHERE id=?").run(String(paymentId), now(), orderId);
+      q('UPDATE users SET changes_balance=changes_balance+? WHERE id=?').run(o.changes, o.user_id);
+      return { credited: o.changes, order: o };
+    });
+  }
+  const getOrder = (id) => q('SELECT * FROM orders WHERE id=?').get(id) || null;
+
   const prizes = () => q(`SELECT p.id, p.kind, p.round_id, p.amount, p.points, p.paid, u.username, u.team_name
                           FROM prizes p JOIN users u ON u.id=p.user_id ORDER BY p.id`).all();
 
@@ -310,6 +341,9 @@ export function createGame(dbPath) {
       squads: q('SELECT COUNT(*) n FROM squads').get().n,
       pins_total: q('SELECT COUNT(*) n FROM pins').get().n,
       pins_used: q('SELECT COUNT(*) n FROM pins WHERE used_by IS NOT NULL').get().n,
+      sales: q("SELECT COUNT(*) n, COALESCE(SUM(amount),0) total, COALESCE(SUM(quantity),0) pins FROM orders WHERE status='paid'").get(),
+      orders: q(`SELECT o.id, o.quantity, o.amount, o.status, o.mp_payment, o.created_at, o.paid_at, u.username
+                 FROM orders o JOIN users u ON u.id=o.user_id WHERE o.status='paid' ORDER BY o.paid_at DESC LIMIT 200`).all(),
       prizes: q(`SELECT p.*, u.username, u.team_name, u.email FROM prizes p JOIN users u ON u.id=p.user_id ORDER BY p.id`).all(),
     }),
     pins: () => q(`SELECT p.code, p.changes, p.batch, p.created_at, p.used_at, u.username used_by FROM pins p
@@ -375,5 +409,5 @@ export function createGame(dbPath) {
     setPrizePaid: (id, paid) => { q('UPDATE prizes SET paid=? WHERE id=?').run(paid ? 1 : 0, id); },
   };
 
-  return { db, register, login, logout, userByToken, ensureAdmin, adminCount, publicUser, bootstrap, saveSquad, redeemPin, ranking, lineup, prizes, lockDueRounds, getSettings, admin };
+  return { db, register, login, logout, userByToken, ensureAdmin, adminCount, publicUser, bootstrap, saveSquad, redeemPin, ranking, lineup, prizes, lockDueRounds, getSettings, createOrder, setOrderPreference, markOrderPaid, getOrder, admin };
 }

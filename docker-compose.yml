@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    container_name: el-mejor-dt
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: 3000
+      DB_PATH: /data/app.db
+      TRUST_PROXY: "1"
+    volumes:
+      - ./data:/data
+    # Solo escucha en la máquina: nginx hace de puerta de entrada con HTTPS.
+    ports:
+      - "127.0.0.1:3010:3000"

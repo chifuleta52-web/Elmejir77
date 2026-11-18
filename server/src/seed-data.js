@@ -67,6 +67,7 @@ export const SETTINGS = {
   pin_price: 2000,          // precio sugerido del PIN en pesos
   pin_buy_info: '',         // cómo comprar (alias, link de pago, WhatsApp...)
   free_changes_per_round: 0,// cambios gratis por fecha (además de los PIN)
+  mp_in_app: 0,             // 1 = mostrar el botón de Mercado Pago también dentro de la app Android
   prize_round: 100000,      // premio al ganador de cada fecha
   prize_tournament: 1000000,// premio al ganador del torneo
 };

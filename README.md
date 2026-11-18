@@ -30,28 +30,53 @@ npm test
 Si no definís `ADMIN_USER` / `ADMIN_PASSWORD`, el primer arranque crea el usuario `admin`
 con una contraseña al azar que se muestra en la consola.
 
-## Publicar el servidor
+## Publicar el servidor en el VPS (Docker + nginx)
 
-La app necesita un servidor público con HTTPS (ranking, PINs y premios se validan ahí).
-Sirve cualquier hosting que corra Docker o Node con disco persistente:
+En el VPS (Ubuntu, con Docker, nginx y certbot ya instalados):
 
 ```bash
-docker build -t el-mejor-dt .
-docker run -d -p 3000:3000 -v dt-data:/data \
-  -e ADMIN_USER=admin -e ADMIN_PASSWORD=una-clave-segura el-mejor-dt
+git clone https://github.com/chifuleta52-web/Elmejir77.git el-mejor-dt && cd el-mejor-dt
+cp .env.example .env && nano .env        # contraseña de admin y token de Mercado Pago
+docker compose up -d --build             # queda escuchando en 127.0.0.1:3010
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/futbol.matiaspendino.com
+sudo ln -s /etc/nginx/sites-available/futbol.matiaspendino.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d futbol.matiaspendino.com
 ```
 
-Variables: `PORT`, `DB_PATH` (archivo SQLite; **hacé copias de seguridad**), `ADMIN_USER`,
-`ADMIN_PASSWORD`, `TRUST_PROXY=1` si está detrás de un proxy.
+Antes, creá en tu DNS un registro **A** `futbol` apuntando a la IP del VPS.
+Si el puerto 3010 ya está ocupado, cambialo en `docker-compose.yml` y en `deploy/nginx.conf`.
+
+- Actualizar: `git pull && docker compose up -d --build`
+- Logs: `docker compose logs -f`
+- Base de datos: `./data/app.db`. Copia de seguridad diaria (agregar con `crontab -e`):
+  `15 4 * * * cd /ruta/el-mejor-dt && docker compose exec -T app node server/src/backup.js /data/backups`
+  (guarda las últimas 30 en `./data/backups`; conviene copiarlas también fuera del VPS).
+
+## Venta de PINs con Mercado Pago
+
+Con `MP_ACCESS_TOKEN` y `PUBLIC_URL` configurados, en la pestaña PINs aparece **Comprar PINs**:
+el usuario elige cantidad, paga en Mercado Pago (Checkout Pro) y al aprobarse el pago los cambios
+se suman solos. No hace falta generar ni mandar códigos. Los PINs manuales siguen funcionando.
+
+- El token sale de [Mercado Pago Developers](https://www.mercadopago.com.ar/developers/panel/app):
+  creá una aplicación (Checkout Pro) y copiá el **Access Token de producción**.
+- El servidor recibe los avisos en `https://futbol.matiaspendino.com/api/payments/webhook` y
+  siempre verifica el pago contra la API de Mercado Pago antes de acreditar.
+- Las ventas se ven en Panel de administración → Resumen.
+- El precio sale de Ajustes → Precio del PIN. Los reembolsos que hagas desde Mercado Pago no
+  descuentan los cambios ya acreditados.
+- Dentro de la app Android el botón está oculto por defecto (Google Play exige su propio sistema
+  de cobro para compras digitales). Se puede mostrar desde Ajustes, bajo tu responsabilidad.
 
 ## Generar la app para Play Store
 
-1. Poné la URL del servidor en `www/config.js` (`API_BASE: 'https://tu-servidor.com'`).
+1. La URL del servidor está en `www/config.js` (`https://futbol.matiaspendino.com`).
 2. Con Android Studio instalado: `npm install && npm run android:apk` (APK de prueba) o
    `npm run android:bundle` (AAB para Play Store).
 3. O sin instalar nada: el workflow **Android** de GitHub Actions compila ambos y los deja
    como artefacto descargable. Configurá en el repositorio:
-   - Variable `API_BASE`: URL del servidor.
+   - Variable `API_BASE` (opcional): otra URL de servidor.
    - Secrets para firmar el AAB: `ANDROID_KEYSTORE_BASE64` (el `.jks` en base64),
      `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
 
